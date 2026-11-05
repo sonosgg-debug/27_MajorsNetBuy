@@ -62,7 +62,7 @@ class StockScreener:
 
     def screen(self, 
                scope="시총 상위 200 (쾌속 모드)",
-               min_market_cap_krw=3000 * 100000000,    # 최소 시가총액 (3000억 원)
+               min_market_cap_krw=5000 * 100000000,    # 최소 시가총액 (5000억 원)
                min_turnover_5d_krw=100 * 100000000,    # 최근 5일 평균 거래대금 (100억 원)
                accum_days=5,                           # 누적 수급 계산 기간 N일
                target_investor="연기금",                 # 분석할 주요 투자 주체
@@ -84,7 +84,7 @@ class StockScreener:
             df_filtered = df_base.sort_values(by="시가총액", ascending=False).head(200)
         elif "500" in scope:
             df_filtered = df_base.sort_values(by="시가총액", ascending=False).head(500)
-        elif "코스피 200" in scope:
+        elif "코스피 200" in scope or "150" in scope:
             if self.market == "KOSPI":
                 df_filtered = df_base.sort_values(by="시가총액", ascending=False).head(200)
             elif self.market == "KOSDAQ":

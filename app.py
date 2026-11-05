@@ -375,7 +375,7 @@ with st.sidebar:
         "시총 상위 200 (쾌속 모드)",
         "시총 상위 500 (확장 모드)",
         "코스피 200 / 코스닥 150",
-        "전체 종목 (전수조사)"
+        "시장 전체 종목 (전체 모드)"
     ]
     sel_scope = st.selectbox(
         "대상 범위",
@@ -390,7 +390,7 @@ with st.sidebar:
     min_mkt_cap = st.select_slider(
         "최소 시가총액",
         options=MIN_MARKET_CAP_OPTIONS,
-        value=3000,
+        value=5000,
         format_func=lambda x: f"{x:,}억 원" if x > 0 else "제한 없음 (전체)",
         label_visibility="collapsed"
     )
