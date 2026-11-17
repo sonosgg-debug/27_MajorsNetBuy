@@ -673,76 +673,134 @@ if st.session_state.screened_df is not None:
                         df_ohlcv = pd.DataFrame()
                         st.write(f"주가 데이터 조회 실패: {e}")
                     
-                    # 듀얼 Y축 차트 생성
-                    fig = make_subplots(specs=[[{"secondary_y": True}]])
+                    # 2단 서브플롯 차트 생성 (상단: 주가 및 5대 주체 누적 수급선, 하단: 선택 주체 일별 순매수 양봉/음봉 막대)
+                    fig = make_subplots(
+                        rows=2, cols=1,
+                        shared_xaxes=True,
+                        vertical_spacing=0.08,
+                        row_heights=[0.62, 0.38],
+                        specs=[[{"secondary_y": True}], [{"secondary_y": False}]]
+                    )
                     
-                    # 1. 주가 라인 (좌측 Y축)
+                    # 1. 주가 라인 (상단 좌측 Y축)
                     if not df_ohlcv.empty:
                         fig.add_trace(
                             go.Scatter(
                                 x=df_ohlcv.index,
                                 y=df_ohlcv["종가"],
                                 name="종가",
-                                line=dict(color="gray", width=2.5)
+                                line=dict(color="#94A3B8", width=2.2),
+                                hovertemplate='%{x}<br>종가: %{y:,.0f}원<extra></extra>'
                             ),
+                            row=1, col=1,
                             secondary_y=False
                         )
                     
-                    # 2. 투자자별 누적 순매수 대금 (우측 Y축, 억 원 단위 변환)
-                    # 누적합 계산
+                    # 2. 투자자별 누적 순매수 대금 (상단 우측 Y축, 억 원 단위 변환)
                     investors_to_plot = ["외국인", "연기금", "투신", "사모", "기관합계"]
-                    colors = {
-                        "외국인": "red",
-                        "연기금": "blue",
-                        "투신": "green",
-                        "사모": "orange",
-                        "기관합계": "purple"
+                    line_colors = {
+                        "외국인": "#EF4444",
+                        "연기금": "#3B82F6",
+                        "투신": "#10B981",
+                        "사모": "#F59E0B",
+                        "기관합계": "#A855F7"
                     }
                     
                     for inv in investors_to_plot:
                         if inv in df_series.columns:
-                            # 원 단위를 억 원 단위로 변환
                             cum_sum = (df_series[inv].cumsum() / 100000000).round(2)
                             fig.add_trace(
                                 go.Scatter(
                                     x=df_series.index,
                                     y=cum_sum,
-                                    name=f"{inv} 누적수급(억)",
-                                    line=dict(color=colors.get(inv, "grey"), width=1.5)
+                                    name=f"{inv} 누적(억)",
+                                    line=dict(color=line_colors.get(inv, "#94A3B8"), width=1.6),
+                                    hovertemplate='%{x}<br>' + f'{inv} 누적: ' + '%{y:,.2f}억 원<extra></extra>'
                                 ),
+                                row=1, col=1,
                                 secondary_y=True
                             )
-                            
+
+                    # 3. 선택된 주 분석 수급 주체의 일별 순매수 막대그래프 (하단, 양수: 빨강, 음수: 파랑)
+                    if "+" in current_investor:
+                        sub_invs = [s.strip() for s in current_investor.split("+")]
+                        target_series = df_series[[inv for inv in sub_invs if inv in df_series.columns]].sum(axis=1)
+                    else:
+                        target_series = df_series[current_investor] if current_investor in df_series.columns else pd.Series(0, index=df_series.index)
+                    
+                    daily_val_100m = (target_series / 100000000).round(2)
+                    bar_colors = np.where(daily_val_100m >= 0, '#EF4444', '#3B82F6')
+                    
+                    fig.add_trace(
+                        go.Bar(
+                            x=daily_val_100m.index,
+                            y=daily_val_100m,
+                            name=f"{current_investor} 일별 순매수",
+                            marker_color=bar_colors,
+                            opacity=0.85,
+                            hovertemplate='%{x}<br>' + f'{current_investor} 순매수: ' + '%{y:,.2f}억 원<extra></extra>'
+                        ),
+                        row=2, col=1
+                    )
+                    
+                    # 최근 연속 순매수/순매도 일수 계산
+                    streak_count = 0
+                    streak_badge = ""
+                    if not daily_val_100m.empty:
+                        vals = daily_val_100m.values
+                        last_val = vals[-1]
+                        is_pos = (last_val > 0)
+                        for v in reversed(vals):
+                            if (v > 0) == is_pos and v != 0:
+                                streak_count += 1
+                            else:
+                                break
+                        if is_pos:
+                            streak_badge = f"<span style='background-color: rgba(239, 68, 68, 0.2); color: #FCA5A5; border: 1px solid #EF4444; padding: 4px 10px; border-radius: 6px; font-weight: 600; font-size: 0.85rem;'>🔥 {current_investor} 최근 {streak_count}일 연속 순매수 중</span>"
+                        else:
+                            streak_badge = f"<span style='background-color: rgba(59, 130, 246, 0.2); color: #93C5FD; border: 1px solid #3B82F6; padding: 4px 10px; border-radius: 6px; font-weight: 600; font-size: 0.85rem;'>❄️ {current_investor} 최근 {streak_count}일 연속 순매도</span>"
+
                     # 차트 레이아웃 조정 (고대비 Tailwind Slate 표준 테마)
                     fig.update_layout(
                         template="plotly_dark",
                         paper_bgcolor=STANDARD_CHART_THEME['paper_bgcolor'],
                         plot_bgcolor=STANDARD_CHART_THEME['plot_bgcolor'],
                         title=dict(
-                            text=f"<b>{selected_name} ({selected_ticker}) 주가 및 누적 수급 흐름</b>",
+                            text=f"<b>{selected_name} ({selected_ticker}) 주가 · 누적 수급 및 {current_investor} 일별 순매수 추이</b>",
                             font=dict(color="#F8FAFC", size=16)
                         ),
                         xaxis=dict(
+                            gridcolor="#334155",
+                            linecolor="#475569",
+                            tickfont=dict(color="#cbd5e1")
+                        ),
+                        xaxis2=dict(
                             title="날짜",
                             gridcolor="#334155",
                             linecolor="#475569",
                             tickfont=dict(color="#cbd5e1")
                         ),
                         legend=dict(
-                            x=0.01,
-                            y=0.99,
+                            orientation="h",
+                            x=0.5,
+                            xanchor="center",
+                            y=1.08,
+                            yanchor="bottom",
                             bgcolor="rgba(30, 41, 59, 0.85)",
                             bordercolor="#334155",
                             borderwidth=1,
                             font=dict(color="#F8FAFC", size=11)
                         ),
                         hovermode="x unified",
-                        height=600
+                        height=750
                     )
                     
-                    fig.update_yaxes(title_text="주가 (원)", secondary_y=False, gridcolor="#334155", linecolor="#475569", tickfont=dict(color="#cbd5e1"))
-                    fig.update_yaxes(title_text="누적 순매수 대금 (억 원)", secondary_y=True, showgrid=False, linecolor="#475569", tickfont=dict(color="#cbd5e1"))
+                    fig.update_yaxes(title_text="주가 (원)", row=1, col=1, secondary_y=False, gridcolor="#334155", linecolor="#475569", tickfont=dict(color="#cbd5e1"))
+                    fig.update_yaxes(title_text="누적 순매수 (억 원)", row=1, col=1, secondary_y=True, showgrid=False, linecolor="#475569", tickfont=dict(color="#cbd5e1"))
+                    fig.update_yaxes(title_text="일별 순매수 (억 원)", row=2, col=1, gridcolor="#334155", linecolor="#475569", tickfont=dict(color="#cbd5e1"), zeroline=True, zerolinecolor="#64748b", zerolinewidth=1.2)
                     
+                    if streak_badge:
+                        st.markdown(f"<div style='margin-bottom: 8px;'>{streak_badge}</div>", unsafe_allow_html=True)
                     st.plotly_chart(fig, use_container_width=True)
                     
                     # 당일의 수급 주체별 상세 표 제공
