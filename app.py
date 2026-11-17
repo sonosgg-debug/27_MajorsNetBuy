@@ -767,14 +767,12 @@ if st.session_state.screened_df is not None:
                             streak_badge = f"<span style='background-color: rgba(59, 130, 246, 0.2); color: #93C5FD; border: 1px solid #3B82F6; padding: 4px 10px; border-radius: 6px; font-weight: 600; font-size: 0.85rem;'>❄️ {current_investor} 최근 {streak_count}일 연속 순매도</span>"
 
                     # 차트 레이아웃 조정 (고대비 Tailwind Slate 표준 테마)
+                    # 제목은 차트 외부 상단 헤더로 분리하여 범례와의 겹침을 원천 방지
                     fig.update_layout(
                         template="plotly_dark",
                         paper_bgcolor=STANDARD_CHART_THEME['paper_bgcolor'],
                         plot_bgcolor=STANDARD_CHART_THEME['plot_bgcolor'],
-                        title=dict(
-                            text=f"<b>{selected_name} ({selected_ticker}) 주가 (일봉 캔들) · 누적 수급 및 {current_investor} 일별 순매수 추이</b>",
-                            font=dict(color="#F8FAFC", size=16)
-                        ),
+                        margin=dict(l=20, r=20, t=40, b=20),
                         xaxis=dict(
                             gridcolor="#334155",
                             linecolor="#475569",
@@ -793,7 +791,7 @@ if st.session_state.screened_df is not None:
                             orientation="h",
                             x=0.5,
                             xanchor="center",
-                            y=1.08,
+                            y=1.02,
                             yanchor="bottom",
                             bgcolor="rgba(30, 41, 59, 0.85)",
                             bordercolor="#334155",
@@ -819,8 +817,16 @@ if st.session_state.screened_df is not None:
                             rbreaks.append(dict(values=holidays))
                         fig.update_xaxes(rangebreaks=rbreaks)
                     
-                    if streak_badge:
-                        st.markdown(f"<div style='margin-bottom: 8px;'>{streak_badge}</div>", unsafe_allow_html=True)
+                    # 차트 상단 헤더: 종목명 및 수급 분석 타이틀과 연속 매수 뱃지를 분리 배치 (겹침 방지)
+                    chart_header_html = (
+                        f"<div style='display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin: 12px 0 6px 0;'>"
+                        f"<div style='font-size: 1.05rem; font-weight: 700; color: #F8FAFC;'>"
+                        f"<span>📊</span> {selected_name} ({selected_ticker}) 주가 (일봉 캔들) · 누적 수급 및 {current_investor} 일별 순매수"
+                        f"</div>"
+                        f"{streak_badge}"
+                        f"</div>"
+                    )
+                    st.markdown(chart_header_html, unsafe_allow_html=True)
                     st.plotly_chart(fig, use_container_width=True)
                     
                     # 당일의 수급 주체별 상세 표 제공
