@@ -682,15 +682,20 @@ if st.session_state.screened_df is not None:
                         specs=[[{"secondary_y": True}], [{"secondary_y": False}]]
                     )
                     
-                    # 1. 주가 라인 (상단 좌측 Y축)
+                    # 1. 주가 일봉 캔들스틱 (상단 좌측 Y축)
                     if not df_ohlcv.empty:
                         fig.add_trace(
-                            go.Scatter(
+                            go.Candlestick(
                                 x=df_ohlcv.index,
-                                y=df_ohlcv["종가"],
-                                name="종가",
-                                line=dict(color="#94A3B8", width=2.2),
-                                hovertemplate='%{x}<br>종가: %{y:,.0f}원<extra></extra>'
+                                open=df_ohlcv["시가"],
+                                high=df_ohlcv["고가"],
+                                low=df_ohlcv["저가"],
+                                close=df_ohlcv["종가"],
+                                name="주가 (일봉)",
+                                increasing_line_color="#EF4444",
+                                increasing_fillcolor="#EF4444",
+                                decreasing_line_color="#3B82F6",
+                                decreasing_fillcolor="#3B82F6",
                             ),
                             row=1, col=1,
                             secondary_y=False
@@ -766,20 +771,23 @@ if st.session_state.screened_df is not None:
                         paper_bgcolor=STANDARD_CHART_THEME['paper_bgcolor'],
                         plot_bgcolor=STANDARD_CHART_THEME['plot_bgcolor'],
                         title=dict(
-                            text=f"<b>{selected_name} ({selected_ticker}) 주가 · 누적 수급 및 {current_investor} 일별 순매수 추이</b>",
+                            text=f"<b>{selected_name} ({selected_ticker}) 주가 (일봉 캔들) · 누적 수급 및 {current_investor} 일별 순매수 추이</b>",
                             font=dict(color="#F8FAFC", size=16)
                         ),
                         xaxis=dict(
                             gridcolor="#334155",
                             linecolor="#475569",
-                            tickfont=dict(color="#cbd5e1")
+                            tickfont=dict(color="#cbd5e1"),
+                            rangeslider=dict(visible=False)
                         ),
                         xaxis2=dict(
                             title="날짜",
                             gridcolor="#334155",
                             linecolor="#475569",
-                            tickfont=dict(color="#cbd5e1")
+                            tickfont=dict(color="#cbd5e1"),
+                            rangeslider=dict(visible=False)
                         ),
+                        xaxis_rangeslider_visible=False,
                         legend=dict(
                             orientation="h",
                             x=0.5,
