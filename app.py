@@ -808,6 +808,17 @@ if st.session_state.screened_df is not None:
                     fig.update_yaxes(title_text="누적 순매수 (억 원)", row=1, col=1, secondary_y=True, showgrid=False, linecolor="#475569", tickfont=dict(color="#cbd5e1"))
                     fig.update_yaxes(title_text="일별 순매수 (억 원)", row=2, col=1, gridcolor="#334155", linecolor="#475569", tickfont=dict(color="#cbd5e1"), zeroline=True, zerolinecolor="#64748b", zerolinewidth=1.2)
                     
+                    # 주말 및 공휴일 공백 제거 (rangebreaks)
+                    chart_index = df_ohlcv.index if not df_ohlcv.empty else df_series.index
+                    if len(chart_index) > 1:
+                        dt_all = pd.date_range(start=chart_index[0], end=chart_index[-1], freq='B')
+                        existing_dates = set(pd.to_datetime(chart_index).normalize())
+                        holidays = [d.strftime('%Y-%m-%d') for d in dt_all if d.normalize() not in existing_dates]
+                        rbreaks = [dict(bounds=["sat", "mon"])]
+                        if holidays:
+                            rbreaks.append(dict(values=holidays))
+                        fig.update_xaxes(rangebreaks=rbreaks)
+                    
                     if streak_badge:
                         st.markdown(f"<div style='margin-bottom: 8px;'>{streak_badge}</div>", unsafe_allow_html=True)
                     st.plotly_chart(fig, use_container_width=True)
