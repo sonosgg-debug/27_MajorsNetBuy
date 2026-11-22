@@ -410,8 +410,8 @@ with st.sidebar:
     st.markdown("<div style='font-size: 0.95rem; font-weight: 700; color: #e2e8f0; margin-bottom: 6px;'>🎯 수급 상세 조건</div>", unsafe_allow_html=True)
     target_investor = st.selectbox(
         "주 분석 수급 주체", 
-        ["연기금", "투신", "사모", "금융투자", "기관합계", "외국인", "외국인+연기금", "외국인+투신+연기금"], 
-        index=6
+        ["연기금", "투신", "사모", "금융투자", "기관합계", "투신+사모+연기금", "외국인", "외국인+연기금", "외국인+투신+연기금"], 
+        index=5
     )
 
     accum_days = st.slider("누적 수급 계산 기간 N (일)", min_value=1, max_value=60, value=5)
