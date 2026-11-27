@@ -42,6 +42,7 @@ try:
     from data_loader import (
         setup_krx_auth,
         get_db_status,
+        get_kis_token_status,
         fetch_daily_net_purchases_series,
         get_nearest_business_day,
         is_krx_trading_day
@@ -347,7 +348,7 @@ with st.sidebar:
             latest_fmt = latest_d or "확인 중"
         st.markdown(
             f"""
-            <div style='background-color: #0f172a; border: 1px solid #10b981; border-radius: 8px; padding: 10px 12px; margin-bottom: 14px;'>
+            <div style='background-color: #0f172a; border: 1px solid #10b981; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px;'>
                 <div style='font-size: 0.85rem; font-weight: 700; color: #10b981; display: flex; align-items: center; gap: 6px;'>
                     <span>🟢</span> 서버 캐시 DB 연동 모드
                 </div>
@@ -362,12 +363,30 @@ with st.sidebar:
     else:
         st.markdown(
             """
-            <div style='background-color: #0f172a; border: 1px solid #f59e0b; border-radius: 8px; padding: 10px 12px; margin-bottom: 14px;'>
+            <div style='background-color: #0f172a; border: 1px solid #f59e0b; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px;'>
                 <div style='font-size: 0.85rem; font-weight: 700; color: #f59e0b; display: flex; align-items: center; gap: 6px;'>
                     <span>🟡</span> 로컬 파일 캐시 모드
                 </div>
                 <div style='font-size: 0.78rem; color: #94a3b8; margin-top: 4px;'>
                     서버 캐시 DB 미발견 (로컬 파일 캐시로 동작)
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    # 2. KIS 공용 토큰 상태 안내 배지
+    kis_info = get_kis_token_status()
+    if kis_info.get("available"):
+        expires_str = kis_info.get("expires_at", "")
+        st.markdown(
+            f"""
+            <div style='background-color: #0f172a; border: 1px solid #38bdf8; border-radius: 8px; padding: 8px 12px; margin-bottom: 14px;'>
+                <div style='font-size: 0.82rem; font-weight: 700; color: #38bdf8; display: flex; align-items: center; gap: 6px;'>
+                    <span>🔑</span> KIS 공용 토큰 연동 활성
+                </div>
+                <div style='font-size: 0.74rem; color: #94a3b8; margin-top: 2px;'>
+                    만료: {expires_str} (무중단 보완 백업)
                 </div>
             </div>
             """,

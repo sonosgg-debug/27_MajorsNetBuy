@@ -19,11 +19,15 @@ except Exception:
 import os
 import sys
 import time
+import json
 import pickle
 import sqlite3
 import datetime
 from pathlib import Path
 import pandas as pd
+from dotenv import load_dotenv
+
+load_dotenv()
 from pykrx import stock
 
 # 캐시 디렉토리 설정
@@ -78,6 +82,73 @@ def get_db_status() -> dict:
         }
     except Exception as e:
         return {"connected": False, "path": str(db_path), "error": str(e), "latest_date": None, "stock_count": 0}
+
+# -----------------------------------------------------------------------------
+# 한투(KIS) 공용 토큰 확인 및 상태 반환
+# -----------------------------------------------------------------------------
+def get_kis_token_status() -> dict:
+    """공용 KIS 토큰(kis_token.json) 유효성 및 만료 시간 확인"""
+    current_dir = Path(__file__).resolve().parent
+    candidates = [
+        os.getenv("KIS_TOKEN_FILE"),
+        "/home/ubuntu/apps/kis_token.json",
+        str(current_dir.parent / "00 API Key" / "kis_token.json"),
+        r"D:\AI Investing\00 API Key\kis_token.json",
+        str(current_dir / "data" / "kis_token.json")
+    ]
+    now_ts = time.time()
+    for p in candidates:
+        if p and os.path.exists(p):
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    tok = json.load(f)
+                exp = tok.get("expires_at", 0)
+                if tok.get("access_token") and exp > now_ts + 60:
+                    exp_dt = datetime.datetime.fromtimestamp(exp)
+                    hours_left = round((exp - now_ts) / 3600, 1)
+                    return {
+                        "available": True,
+                        "path": p,
+                        "expires_at": exp_dt.strftime("%Y-%m-%d %H:%M"),
+                        "hours_left": hours_left
+                    }
+            except Exception:
+                pass
+    return {"available": False, "path": None, "expires_at": None, "hours_left": 0}
+
+def get_kis_access_token() -> str:
+    """공용 KIS 토큰 문자열 반환"""
+    status = get_kis_token_status()
+    if status["available"]:
+        with open(status["path"], "r", encoding="utf-8") as f:
+            return json.load(f).get("access_token")
+    return None
+
+def _load_kis_credentials():
+    """KIS AppKey 및 AppSecret 자동 로드"""
+    if not os.getenv("KIS_APP_KEY") or not os.getenv("KIS_APP_SECRET"):
+        load_dotenv()
+        current_dir = Path(__file__).resolve().parent
+        candidates = [
+            Path("/home/ubuntu/apps/.env"),
+            current_dir.parent / "00 API Key" / "한국투자증권 API_kis.txt",
+            Path(r"D:\AI Investing\00 API Key\한국투자증권 API_kis.txt"),
+            current_dir / ".env"
+        ]
+        for p in candidates:
+            if p.exists():
+                try:
+                    with open(p, "r", encoding="utf-8") as f:
+                        for line in f:
+                            line = line.strip()
+                            if "appkey" in line.lower() or "app_key" in line.lower() or line.startswith("KIS_APP_KEY="):
+                                val = line.split("=" if "=" in line else ":", 1)[1].strip().strip('"').strip("'")
+                                os.environ["KIS_APP_KEY"] = val
+                            elif "appsecret" in line.lower() or "app_secret" in line.lower() or line.startswith("KIS_APP_SECRET="):
+                                val = line.split("=" if "=" in line else ":", 1)[1].strip().strip('"').strip("'")
+                                os.environ["KIS_APP_SECRET"] = val
+                except Exception:
+                    pass
 
 def fetch_market_cap_from_db(date_str, market="ALL"):
     """SQLite 캐시 DB에서 전종목 시가총액/거래대금/종목명 즉시 조회 (0.01초 소요)"""
@@ -428,11 +499,15 @@ def fetch_investor_net_purchases_with_cache(start_date, end_date, market="ALL", 
 def fetch_daily_net_purchases_series(start_date, end_date, ticker):
     """
     특정 종목의 일자별 투자자별 순매수 거래대금 추이를 가져옵니다. (시각화용)
+    1차: 로컬 디스크 pkl 캐시
+    2차: 백그라운드 자동인증 후 PyKRX 호출 (원 단위)
+    3차: KIS 공용 토큰 OpenAPI 폴백 (TR: FHKST01010900)
     """
     start_date = get_nearest_business_day(start_date)
     end_date = get_nearest_business_day(end_date)
+    clean_ticker = str(ticker).zfill(6)
     
-    cache_path = os.path.join(CACHE_DIR, f"daily_series_{ticker}_{start_date}_{end_date}.pkl")
+    cache_path = os.path.join(CACHE_DIR, f"daily_series_{clean_ticker}_{start_date}_{end_date}.pkl")
     today_str = get_now_kst().strftime("%Y%m%d")
     is_live = (end_date >= today_str)
     
@@ -443,18 +518,73 @@ def fetch_daily_net_purchases_series(start_date, end_date, ticker):
         except Exception as e:
             print(f"Cache read error for daily series: {e}")
             
-    time.sleep(0.5)
+    time.sleep(0.3)
+    # 1. PyKRX 호출
     try:
-        # get_market_trading_value_by_date는 일자별 투자자들의 순매수대금을 가져옴 (원 단위)
-        df = stock.get_market_trading_value_by_date(start_date, end_date, ticker, detail=True)
-        
+        df = stock.get_market_trading_value_by_date(start_date, end_date, clean_ticker, detail=True)
         if not is_live and not df.empty:
             with open(cache_path, "wb") as f:
                 pickle.dump(df, f)
-        return df
+        if not df.empty:
+            return df
     except Exception as e:
-        print(f"Failed to fetch daily series for {ticker}: {e}")
-        return pd.DataFrame()
+        print(f"Failed to fetch daily series for {clean_ticker}: {e}")
+
+    # 2. KIS OpenAPI 폴백 (공용 토큰 FHKST01010900)
+    token = get_kis_access_token()
+    _load_kis_credentials()
+    app_key = os.getenv("KIS_APP_KEY")
+    app_secret = os.getenv("KIS_APP_SECRET")
+    if token and app_key and app_secret:
+        try:
+            url = "https://openapi.koreainvestment.com:9443/uapi/domestic-stock/v1/quotations/inquire-investor"
+            headers = {
+                "content-type": "application/json; charset=utf-8",
+                "authorization": f"Bearer {token}",
+                "appkey": app_key,
+                "appsecret": app_secret,
+                "tr_id": "FHKST01010900",
+                "custtype": "P"
+            }
+            params = {
+                "FID_COND_MRKT_DIV_CODE": "J",
+                "FID_INPUT_ISCD": clean_ticker
+            }
+            resp = requests.get(url, headers=headers, params=params, timeout=5)
+            if resp.status_code == 200:
+                raw_out = resp.json().get("output", [])
+                records = []
+                for row in raw_out:
+                    d_raw = str(row.get("stck_bsop_date", ""))
+                    if start_date <= d_raw <= end_date:
+                        prsn = float(row.get("prsn_ntby_tr_pbmn", 0)) * 1_000_000.0
+                        frgn = float(row.get("frgn_ntby_tr_pbmn", 0)) * 1_000_000.0
+                        orgn = float(row.get("orgn_ntby_tr_pbmn", 0)) * 1_000_000.0
+                        records.append({
+                            "날짜": f"{d_raw[:4]}-{d_raw[4:6]}-{d_raw[6:]}",
+                            "금융투자": 0.0,
+                            "보험": 0.0,
+                            "투신": 0.0,
+                            "사모": 0.0,
+                            "은행": 0.0,
+                            "기타금융": 0.0,
+                            "연기금": 0.0,
+                            "기타법인": 0.0,
+                            "개인": prsn,
+                            "외국인": frgn,
+                            "기타외국인": 0.0,
+                            "전체": prsn + frgn + orgn,
+                            "기관합계": orgn
+                        })
+                if records:
+                    kis_df = pd.DataFrame(records)
+                    kis_df["날짜"] = pd.to_datetime(kis_df["날짜"])
+                    kis_df = kis_df.set_index("날짜").sort_index()
+                    return kis_df
+        except Exception as e_kis:
+            print(f"[Investor] KIS API fallback notice in 27 MajorsNetBuy: {e_kis}")
+
+    return pd.DataFrame()
 
 def get_latest_expected_trading_day(target_date: str = None) -> str:
     """
