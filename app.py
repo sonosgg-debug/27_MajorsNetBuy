@@ -330,7 +330,7 @@ with st.sidebar:
                 <span>⚙️</span> 스크리닝 조건 설정
             </div>
             <div style='font-size: 0.82rem; color: #94a3b8; margin-top: 4px; line-height: 1.4;'>
-                서버 캐시 DB 기반 외국인/기관 수급 분석 조건을 설정합니다.
+                서버 캐시 DB 및 KIS 공용 토큰 기반 외국인/기관 수급 분석 조건을 설정합니다.
             </div>
         </div>
         <hr style='border: 0; height: 1px; background-color: #334155; margin: 10px 0 14px 0;'>
