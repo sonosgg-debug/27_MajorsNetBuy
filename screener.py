@@ -30,9 +30,13 @@ class StockScreener:
         
         # 시장 구분용 티커 목록 로드 (코스피/코스닥 구분용)
         try:
-            from pykrx import stock
-            self.kospi_tickers = set(stock.get_market_ticker_list(date=self.target_date, market="KOSPI"))
-            self.kosdaq_tickers = set(stock.get_market_ticker_list(date=self.target_date, market="KOSDAQ"))
+            if not self.df_mkt_cap.empty and "market" in self.df_mkt_cap.columns:
+                self.kospi_tickers = set(self.df_mkt_cap[self.df_mkt_cap["market"] == "KOSPI"].index)
+                self.kosdaq_tickers = set(self.df_mkt_cap[self.df_mkt_cap["market"] == "KOSDAQ"].index)
+            else:
+                from pykrx import stock
+                self.kospi_tickers = set(stock.get_market_ticker_list(date=self.target_date, market="KOSPI"))
+                self.kosdaq_tickers = set(stock.get_market_ticker_list(date=self.target_date, market="KOSDAQ"))
         except Exception as e:
             print(f"Error fetching market ticker lists: {e}")
             self.kospi_tickers = set()

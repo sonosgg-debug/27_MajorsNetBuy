@@ -17,9 +17,12 @@ except Exception:
         sys.modules["pkg_resources"] = pkg_mock
 
 import os
+import sys
 import time
 import pickle
+import sqlite3
 import datetime
+from pathlib import Path
 import pandas as pd
 from pykrx import stock
 
@@ -28,14 +31,129 @@ CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache")
 if not os.path.exists(CACHE_DIR):
     os.makedirs(CACHE_DIR)
 
-def setup_krx_auth(krx_id, krx_pw):
+# -----------------------------------------------------------------------------
+# SQLite 캐시 DB 경로 및 상태 조회
+# -----------------------------------------------------------------------------
+def get_krx_db_path() -> Path:
+    """오라클 서버 및 로컬 통합 SQLite 캐시 DB 경로 반환"""
+    env_db = os.getenv("KRX_CACHE_DB")
+    if env_db and os.path.exists(env_db):
+        return Path(env_db)
+
+    # 1) 오라클 서버 경로
+    server_db = Path("/home/ubuntu/apps/data/krx_market_cache.db")
+    if server_db.exists():
+        return server_db
+
+    # 2) 로컬 PC 경로 (00 Bookmarks/data)
+    current_dir = Path(__file__).resolve().parent
+    local_db = current_dir.parent / "00 Bookmarks" / "data" / "krx_market_cache.db"
+    if local_db.exists():
+        return local_db
+
+    # 3) 앱 로컬 data 폴더
+    app_db = current_dir / "data" / "krx_market_cache.db"
+    if app_db.exists():
+        return app_db
+
+    return local_db
+
+def get_db_status() -> dict:
+    """캐시 DB 연결 상태 및 최신 수집 일자 확인"""
+    db_path = get_krx_db_path()
+    if not db_path.exists():
+        return {"connected": False, "path": str(db_path), "latest_date": None, "stock_count": 0}
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=5.0)
+        cur = conn.cursor()
+        cur.execute("SELECT MAX(date), COUNT(DISTINCT ticker) FROM stock_daily_market")
+        row = cur.fetchone()
+        latest_date, count = row if row else (None, 0)
+        conn.close()
+        return {
+            "connected": True,
+            "path": str(db_path),
+            "latest_date": latest_date,
+            "stock_count": count or 0
+        }
+    except Exception as e:
+        return {"connected": False, "path": str(db_path), "error": str(e), "latest_date": None, "stock_count": 0}
+
+def fetch_market_cap_from_db(date_str, market="ALL"):
+    """SQLite 캐시 DB에서 전종목 시가총액/거래대금/종목명 즉시 조회 (0.01초 소요)"""
+    db_path = get_krx_db_path()
+    if not db_path.exists():
+        return None
+
+    clean_date = date_str.replace("-", "")
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=5.0)
+        if market in ["KOSPI", "KOSDAQ"]:
+            query = """
+            SELECT ticker, name as 종목명, close as 종가, market_cap as 시가총액, 
+                   trading_volume as 거래량, trading_value as 거래대금, shares as 상장주식수, market
+            FROM stock_daily_market 
+            WHERE date = ? AND market = ?
+            """
+            params = (clean_date, market)
+        else:
+            query = """
+            SELECT ticker, name as 종목명, close as 종가, market_cap as 시가총액, 
+                   trading_volume as 거래량, trading_value as 거래대금, shares as 상장주식수, market
+            FROM stock_daily_market 
+            WHERE date = ?
+            """
+            params = (clean_date,)
+
+        df = pd.read_sql_query(query, conn, params=params)
+        conn.close()
+
+        if not df.empty:
+            df.set_index("ticker", inplace=True)
+            return df
+    except Exception as e:
+        print(f"[DB Error] fetch_market_cap_from_db: {e}")
+    return None
+
+def setup_krx_auth(krx_id=None, krx_pw=None):
     """
     KRX 계정 정보를 환경변수에 주입하여 pykrx가 세션을 맺을 수 있도록 설정합니다.
+    인자가 없을 경우 .env 또는 자격증명 파일에서 자동 로드합니다.
     """
+    if not krx_id or not krx_pw:
+        krx_id = os.getenv("KRX_ID")
+        krx_pw = os.getenv("KRX_PW")
+
+    # .env 파일 또는 로컬 텍스트 파일 폴백
+    if not krx_id or not krx_pw:
+        env_candidates = [
+            Path(__file__).resolve().parent / ".env",
+            Path(__file__).resolve().parent.parent / "01_MarketOverview2" / ".env",
+            Path(__file__).resolve().parent.parent / "01 MarketOverview2" / ".env",
+            Path(r"D:\AI Investing\00 API Key\KRX ID&PW.txt")
+        ]
+        for p in env_candidates:
+            if p.exists():
+                try:
+                    with open(p, "r", encoding="utf-8") as f:
+                        for line in f:
+                            line = line.strip()
+                            if line.startswith("KRX_ID="):
+                                krx_id = line.split("=", 1)[1].strip().strip('"').strip("'")
+                            elif line.startswith("KRX_PW="):
+                                krx_pw = line.split("=", 1)[1].strip().strip('"').strip("'")
+                            elif line.startswith("ID :") or line.startswith("ID:"):
+                                krx_id = line.split(":", 1)[1].strip()
+                            elif line.startswith("PW :") or line.startswith("PW:"):
+                                krx_pw = line.split(":", 1)[1].strip()
+                    if krx_id and krx_pw:
+                        break
+                except Exception:
+                    pass
+
     if krx_id and krx_pw:
         os.environ["KRX_ID"] = krx_id
         os.environ["KRX_PW"] = krx_pw
-        # pykrx의 내부 auth 모듈을 임포트하여 강제로 세션 초기화 유도
         try:
             from pykrx.website.comm.auth import get_auth_session
             session = get_auth_session()
@@ -44,6 +162,9 @@ def setup_krx_auth(krx_id, krx_pw):
         except Exception as e:
             print(f"KRX Auth Setup Error: {e}")
     return False
+
+# 백그라운드 자동 인증 시도
+setup_krx_auth()
 
 import requests
 
@@ -185,9 +306,18 @@ def get_nearest_business_day(date_str=None):
 def fetch_market_cap_with_cache(date_str, market="ALL"):
     """
     특정 날짜의 시장 전체 종목 시가총액 정보를 가져오고 캐싱합니다.
-    (종가, 시가총액, 거래량, 거래대금, 상장주식수)
+    (종가, 시가총액, 거래량, 거래대금, 상장주식수, 종목명)
+    - 1순위: SQLite 캐시 DB (krx_market_cache.db) 조회 (초고속 0.01초, KRX 트래픽 0)
+    - 2순위: 로컬 pkl 파일 캐시
+    - 3순위: pykrx 직접 호출 (백업)
     """
     date_str = get_nearest_business_day(date_str)
+
+    # 1. SQLite 캐시 DB 우선 조회
+    df_db = fetch_market_cap_from_db(date_str, market=market)
+    if df_db is not None and not df_db.empty:
+        return df_db
+
     cache_path = os.path.join(CACHE_DIR, f"mkt_cap_{market}_{date_str}.pkl")
     
     # 오늘 또는 미래 날짜는 캐시하지 않음

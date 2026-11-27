@@ -41,6 +41,7 @@ try:
     importlib.reload(data_loader)
     from data_loader import (
         setup_krx_auth,
+        get_db_status,
         fetch_daily_net_purchases_series,
         get_nearest_business_day,
         is_krx_trading_day
@@ -318,8 +319,6 @@ st.markdown("<hr style='border: 0; height: 1px; background-color: #334155; margi
 # 세션 상태 초기화 (결과 캐싱용)
 if "screened_df" not in st.session_state:
     st.session_state.screened_df = None
-if "auth_status" not in st.session_state:
-    st.session_state.auth_status = False
 
 # ================= SIDEBAR =================
 with st.sidebar:
@@ -330,27 +329,51 @@ with st.sidebar:
                 <span>⚙️</span> 스크리닝 조건 설정
             </div>
             <div style='font-size: 0.82rem; color: #94a3b8; margin-top: 4px; line-height: 1.4;'>
-                KRX 세션 연동 및 외국인/기관 수급 분석 조건을 설정합니다.
+                서버 캐시 DB 기반 외국인/기관 수급 분석 조건을 설정합니다.
             </div>
         </div>
-        <hr style='border: 0; height: 1px; background-color: #334155; margin: 10px 0 16px 0;'>
+        <hr style='border: 0; height: 1px; background-color: #334155; margin: 10px 0 14px 0;'>
         """,
         unsafe_allow_html=True
     )
 
-    krx_id = st.text_input("KRX ID", value=os.getenv("KRX_ID", ""))
-    krx_pw = st.text_input("KRX Password", type="password", value=os.getenv("KRX_PW", ""))
+    # 캐시 DB 연결 상태 안내 배지
+    db_info = get_db_status()
+    if db_info.get("connected"):
+        latest_d = str(db_info.get("latest_date", ""))
+        if len(latest_d) == 8:
+            latest_fmt = f"{latest_d[:4]}-{latest_d[4:6]}-{latest_d[6:]}"
+        else:
+            latest_fmt = latest_d or "확인 중"
+        st.markdown(
+            f"""
+            <div style='background-color: #0f172a; border: 1px solid #10b981; border-radius: 8px; padding: 10px 12px; margin-bottom: 14px;'>
+                <div style='font-size: 0.85rem; font-weight: 700; color: #10b981; display: flex; align-items: center; gap: 6px;'>
+                    <span>🟢</span> 서버 캐시 DB 연동 모드
+                </div>
+                <div style='font-size: 0.78rem; color: #94a3b8; margin-top: 4px; line-height: 1.4;'>
+                    최신 수집일: <span style='color: #f8fafc; font-weight: 600;'>{latest_fmt}</span> ({db_info.get("stock_count", 0):,}개 종목)<br>
+                    <span style='color: #64748b;'>로그인 불필요 · 초고속 즉시 조회</span>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    else:
+        st.markdown(
+            """
+            <div style='background-color: #0f172a; border: 1px solid #f59e0b; border-radius: 8px; padding: 10px 12px; margin-bottom: 14px;'>
+                <div style='font-size: 0.85rem; font-weight: 700; color: #f59e0b; display: flex; align-items: center; gap: 6px;'>
+                    <span>🟡</span> 로컬 파일 캐시 모드
+                </div>
+                <div style='font-size: 0.78rem; color: #94a3b8; margin-top: 4px;'>
+                    서버 캐시 DB 미발견 (로컬 파일 캐시로 동작)
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
-    if st.button("🔑 세션 연결 및 로그인", use_container_width=True):
-        with st.spinner("KRX 로그인 세션 설정 중..."):
-            success = setup_krx_auth(krx_id, krx_pw)
-            st.session_state.auth_status = success
-            if success:
-                st.success("✅ KRX 로그인 연동 성공!")
-            else:
-                st.error("❌ 로그인 실패 (아이디/비번 혹은 IP 차단 상태 확인)")
-
-    st.markdown("<hr style='border: 0; height: 1px; background-color: #334155; margin: 16px 0;'>", unsafe_allow_html=True)
     st.markdown("<div style='font-size: 0.95rem; font-weight: 700; color: #e2e8f0; margin-bottom: 6px;'>⚙️ 스크리닝 필터 설정</div>", unsafe_allow_html=True)
 
     # 시장 구분
@@ -424,10 +447,6 @@ with st.sidebar:
     # 양매수 필수 여부
     require_dual = st.checkbox("당일 외인+기관 양매수 필수", value=False)
 
-# 로그인 안된 상태에서 메인 화면 경고 안내
-if not st.session_state.auth_status:
-    st.warning("⚠️ KRX 로그인 세션이 연동되지 않았습니다. 분석 시작 전 사이드바에서 로그인을 진행해 주세요.")
-
 # ================= MAIN PAGE =================
 col_date, col_btn = st.columns([3, 1])
 
@@ -449,35 +468,32 @@ with col_btn:
     run_button = st.button("🔍 스크리닝 시작", type="primary", use_container_width=True)
 
 if run_button:
-    if not st.session_state.auth_status:
-        st.error("분석을 시작하기 위해 먼저 사이드바에서 KRX 로그인을 완료해 주십시오.")
-    else:
-        with st.spinner("KRX 데이터를 로드하고 지표를 계산 중입니다. 캐시가 없는 날짜는 시간이 다소 소요될 수 있습니다..."):
-            try:
-                # 휴장일일 경우 직전 실제 거래일로 안전하게 적용
-                target_bday = actual_target_bday
-                screener = StockScreener(target_date=target_bday, market=market)
-                df_result = screener.screen(
-                    scope=sel_scope,
-                    min_market_cap_krw=min_mkt_cap * 100000000,
-                    min_turnover_5d_krw=min_turnover * 100000000,
-                    accum_days=accum_days,
-                    target_investor=target_investor,
-                    min_accum_intensity=min_accum_intensity,
-                    min_zscore=min_zscore,
-                    zscore_lookback_days=zscore_lookback,
-                    require_dual_buy=require_dual
-                )
-                st.session_state.screened_df = df_result
-                st.session_state.screened_investor = target_investor
-                st.session_state.screened_market = market
-                st.session_state.screened_scope = sel_scope
-                st.session_state.screened_date = datetime.datetime.strptime(target_bday, "%Y%m%d").date()
-                st.session_state.is_mkt_cap_empty = screener.df_mkt_cap.empty
-                st.session_state.was_holiday_adjusted = (actual_target_bday != target_date_str)
-                st.session_state.original_date_str = selected_date.strftime("%Y-%m-%d")
-            except Exception as e:
-                st.error(f"스크리닝 실행 중 에러가 발생했습니다: {e}")
+    with st.spinner("캐시 데이터를 로드하고 수급 지표를 분석 중입니다..."):
+        try:
+            # 휴장일일 경우 직전 실제 거래일로 안전하게 적용
+            target_bday = actual_target_bday
+            screener = StockScreener(target_date=target_bday, market=market)
+            df_result = screener.screen(
+                scope=sel_scope,
+                min_market_cap_krw=min_mkt_cap * 100000000,
+                min_turnover_5d_krw=min_turnover * 100000000,
+                accum_days=accum_days,
+                target_investor=target_investor,
+                min_accum_intensity=min_accum_intensity,
+                min_zscore=min_zscore,
+                zscore_lookback_days=zscore_lookback,
+                require_dual_buy=require_dual
+            )
+            st.session_state.screened_df = df_result
+            st.session_state.screened_investor = target_investor
+            st.session_state.screened_market = market
+            st.session_state.screened_scope = sel_scope
+            st.session_state.screened_date = datetime.datetime.strptime(target_bday, "%Y%m%d").date()
+            st.session_state.is_mkt_cap_empty = screener.df_mkt_cap.empty
+            st.session_state.was_holiday_adjusted = (actual_target_bday != target_date_str)
+            st.session_state.original_date_str = selected_date.strftime("%Y-%m-%d")
+        except Exception as e:
+            st.error(f"스크리닝 실행 중 에러가 발생했습니다: {e}")
 
 # 스크리닝 결과 표시
 if st.session_state.screened_df is not None:
