@@ -338,60 +338,34 @@ with st.sidebar:
         unsafe_allow_html=True
     )
 
-    # 캐시 DB 연결 상태 안내 배지
-    db_info = get_db_status()
-    if db_info.get("connected"):
-        latest_d = str(db_info.get("latest_date", ""))
-        if len(latest_d) == 8:
-            latest_fmt = f"{latest_d[:4]}-{latest_d[4:6]}-{latest_d[6:]}"
-        else:
-            latest_fmt = latest_d or "확인 중"
-        st.markdown(
-            f"""
-            <div style='background-color: #0f172a; border: 1px solid #10b981; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px;'>
-                <div style='font-size: 0.85rem; font-weight: 700; color: #10b981; display: flex; align-items: center; gap: 6px;'>
-                    <span>🟢</span> 서버 캐시 DB 연동 모드
-                </div>
-                <div style='font-size: 0.78rem; color: #94a3b8; margin-top: 4px; line-height: 1.4;'>
-                    최신 수집일: <span style='color: #f8fafc; font-weight: 600;'>{latest_fmt}</span> ({db_info.get("stock_count", 0):,}개 종목)<br>
-                    <span style='color: #64748b;'>로그인 불필요 · 초고속 즉시 조회</span>
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+    # 중앙 SQLite DB 및 KIS 공용 토큰 연동 상태 뱃지
+    db_status = get_db_status()
+    kis_status = get_kis_token_status()
+    
+    raw_date = str(db_status.get('latest_date') or db_status.get('date') or '')
+    if len(raw_date) == 8 and raw_date.isdigit():
+        db_date_fmt = f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:]}"
     else:
-        st.markdown(
-            """
-            <div style='background-color: #0f172a; border: 1px solid #f59e0b; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px;'>
-                <div style='font-size: 0.85rem; font-weight: 700; color: #f59e0b; display: flex; align-items: center; gap: 6px;'>
-                    <span>🟡</span> 로컬 파일 캐시 모드
-                </div>
-                <div style='font-size: 0.78rem; color: #94a3b8; margin-top: 4px;'>
-                    서버 캐시 DB 미발견 (로컬 파일 캐시로 동작)
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+        db_date_fmt = raw_date
+        
+    db_badge_color = "#10b981" if db_status.get('connected') else "#64748b"
+    db_badge_text = "🟢 서버 캐시 DB 연동" if db_status.get('connected') else "⚪ 로컬 캐시 모드"
+    db_date_str = f"| {db_date_fmt}" if db_status.get('connected') and db_date_fmt else ""
+    
+    kis_badge_html = "<div style='font-size: 0.76rem; color: #38bdf8; margin-top: 2px;'>🔑 KIS 공용 토큰 연동 활성</div>" if kis_status.get('available') else ""
 
-    # 2. KIS 공용 토큰 상태 안내 배지
-    kis_info = get_kis_token_status()
-    if kis_info.get("available"):
-        expires_str = kis_info.get("expires_at", "")
-        st.markdown(
-            f"""
-            <div style='background-color: #0f172a; border: 1px solid #38bdf8; border-radius: 8px; padding: 8px 12px; margin-bottom: 14px;'>
-                <div style='font-size: 0.82rem; font-weight: 700; color: #38bdf8; display: flex; align-items: center; gap: 6px;'>
-                    <span>🔑</span> KIS 공용 토큰 연동 활성
-                </div>
-                <div style='font-size: 0.74rem; color: #94a3b8; margin-top: 2px;'>
-                    만료: {expires_str} (무중단 보완 백업)
-                </div>
+    st.markdown(
+        f"""
+        <div style='background-color: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 8px 10px; margin-bottom: 14px;'>
+            <div style='font-size: 0.78rem; font-weight: 600; color: {db_badge_color}; display: flex; align-items: center; justify-content: space-between;'>
+                <span>{db_badge_text}</span>
+                <span style='color: #94a3b8; font-size: 0.72rem;'>{db_date_str}</span>
             </div>
-            """,
-            unsafe_allow_html=True
-        )
+            {kis_badge_html}
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
     st.markdown("<div style='font-size: 0.95rem; font-weight: 700; color: #e2e8f0; margin-bottom: 6px;'>⚙️ 스크리닝 필터 설정</div>", unsafe_allow_html=True)
 
